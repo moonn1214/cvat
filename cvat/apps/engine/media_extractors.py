@@ -470,6 +470,60 @@ class Mpeg4CompressedChunkWriter(Mpeg4ChunkWriter):
         output_container.close()
         return [(input_w, input_h)]
 
+#################################    
+class DicomListExtractor(MediaExtractor):
+    def __init__(self, source_path, dest_path, image_quality, step=1, start=0, stop=0):
+        if not source_path:
+            raise Exception('No Dicom found')
+ 
+        import pydicom
+        super().__init__(
+            source_path=sorted(source_path),
+            dest_path=dest_path,
+            image_quality=image_quality,
+            step=1,
+            start=0,
+            stop=0,
+        )
+ 
+        self._dimensions = []
+        series = dict()
+        self._jpeg_source_paths = []
+ 
+        for i, source in enumerate(self._source_path):
+            dcm = pydicom.read_file(source)
+ 
+            series_time = dcm.get("SeriesTime", "")
+            if series_time not in series:
+                series[series_time] = Series(i, dcm.get("SeriesDescription", ""))
+            else:
+                series[series_time].stop_frame = i     
+ 
+            img = _normalize_image(dcm.pixel_array)
+            pilImg = Image.fromarray(img)
+            self._dimensions.append(pilImg.size)
+            jpeg_source_path = os.path.splitext(source)[0] + '.jpg'
+            pilImg.save(jpeg_source_path, 'JPEG')
+            self._jpeg_source_paths.append(jpeg_source_path)
+         
+        self._series = [v for _, v in sorted(series.items())]
+        
+class Series:
+    def __init__(self, start_frame, description):
+        self.start_frame = start_frame
+        self.stop_frame = start_frame
+        self.description = description
+        
+def _normalize_image(img, min_percent = 0, max_percent = 99, gamma = 1.2):
+    vmin = np.percentile(img, min_percent)
+    vmax = np.percentile(img, max_percent)
+    img = ((img - vmin) / (vmax - vmin))
+    img[img &lt; 0] = 0
+    img = pow(img, gamma) * 255
+    img = np.clip(img, 0, 255)
+    return img.astype(np.uint8)
+#################################    
+    
 def _is_archive(path):
     mime = mimetypes.guess_type(path)
     mime_type = mime[0]
